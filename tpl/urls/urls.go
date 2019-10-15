@@ -319,9 +319,6 @@ func (ns *Namespace) ImgixURL(args ...interface{}) (string, error) {
 	} else if len(args) == 4 {
 		// four arguments, this means, 3rd is a server URL and 4th a token
 
-		// when we have a server URL and a token, secureURL is true by default
-		secureURL = true
-
 		serverURL, err = cast.ToStringE(args[2])
 		if err != nil {
 			return "", err
@@ -330,6 +327,11 @@ func (ns *Namespace) ImgixURL(args ...interface{}) (string, error) {
 		token, err = cast.ToStringE(args[3])
 		if err != nil {
 			return "", err
+		}
+
+		// when we have a server URL and a token, secureURL is true by default
+		if token != "" {
+			secureURL = true
 		}
 
 	} else if len(args) > 4 {
