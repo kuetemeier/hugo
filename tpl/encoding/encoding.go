@@ -18,6 +18,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"html/template"
+	"strings"
 
 	"github.com/spf13/cast"
 )
@@ -49,6 +50,25 @@ func (ns *Namespace) Base64Encode(content interface{}) (string, error) {
 	}
 
 	return base64.StdEncoding.EncodeToString([]byte(conv)), nil
+}
+
+// Base64EncodeImgix returns the base64 encoding of the given content
+// according to imgix's Base64 variant requirements.
+//
+// Inspired by: https://github.com/parkr/imgix-go/blob/master/imgix.go (MIT License)
+//
+// See:
+// - https://docs.imgix.com/apis/url#base64-variants
+func (ns *Namespace) Base64EncodeImgix(content interface{}) (string, error) {
+	conv, err := cast.ToStringE(content)
+	if err != nil {
+		return "", err
+	}
+
+	base64EncodedParam := base64.URLEncoding.EncodeToString([]byte(conv))
+	base64EncodedParam = strings.Replace(base64EncodedParam, "=", "", -1)
+
+	return base64EncodedParam, err
 }
 
 // Jsonify encodes a given object to JSON.
