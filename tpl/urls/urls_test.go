@@ -67,3 +67,42 @@ func TestParse(t *testing.T) {
 			qt.CmpEquals(hqt.DeepAllowUnexported(&url.URL{}, url.Userinfo{})), test.expect)
 	}
 }
+
+func TestImgixURL(t *testing.T) {
+	t.Parallel()
+	c := qt.New(t)
+
+	for _, test := range []struct {
+		path      interface{}
+		param     interface{}
+		serverURL interface{}
+		token     interface{}
+		expect    interface{}
+	}{
+		{"path", "", "server", "", "https://server/path"},
+		{"path", "params", "server", "", "https://server/path?params"},
+		{"https://domain.tld/path", "", "server", "", "https://server/https%3A%2F%2Fdomain.tld%2Fpath"},
+		{"http://domain.tld/path", "", "server", "", "https://server/http%3A%2F%2Fdomain.tld%2Fpath"},
+		{"https://domain.tld/path", "", "http://server.tld", "", "http://server.tld/https%3A%2F%2Fdomain.tld%2Fpath"},
+		{"https://domain.tld/path", "", "https://server.tld", "", "https://server.tld/https%3A%2F%2Fdomain.tld%2Fpath"},
+		{"https://domain.tld/path", "w=400", "http://server.tld", "", "http://server.tld/https%3A%2F%2Fdomain.tld%2Fpath?w=400"},
+		{"https://domain.tld/path", "?w=400&h=500", "https://server.tld", "", "https://server.tld/https%3A%2F%2Fdomain.tld%2Fpath?w=400&h=500"},
+		{"https://domain.tld/path", "?w=400&h=500", "https://server.tld", "token", "https://server.tld/https%3A%2F%2Fdomain.tld%2Fpath?w=400&h=500&s=935a95820d579a14a9671a14b2f1397a"},
+
+		// errors
+		{"no server", "-", "", "", false},
+		{"no server", "", "", "", false},
+		{"", "", "", "", false},
+	} {
+
+		result, err := ns.ImgixURL(test.path, test.param, test.serverURL, test.token)
+
+		if b, ok := test.expect.(bool); ok && !b {
+			c.Assert(err, qt.Not(qt.IsNil))
+			continue
+		}
+
+		c.Assert(err, qt.IsNil)
+		c.Assert(result, qt.Equals, test.expect)
+	}
+}
