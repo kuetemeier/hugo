@@ -41,6 +41,14 @@ func init() {
 			[]string{"base64Encode"},
 			[][2]string{
 				{`{{ "Hello world" | base64Encode }}`, `SGVsbG8gd29ybGQ=`},
+				{`{{ "Hello%2C%20World!" | base64Encode }}`, `SGVsbG8lMkMlMjBXb3JsZCE=`},
+			},
+		)
+
+		ns.AddMethodMapping(ctx.Base64EncodeImgix,
+			[]string{"base64EncodeImgix"},
+			[][2]string{
+				{`{{ "Hello%2C%20World!" | base64EncodeImgix }}`, `SGVsbG8lMkMlMjBXb3JsZCE`},
 			},
 		)
 

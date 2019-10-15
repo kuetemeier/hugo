@@ -77,6 +77,33 @@ func TestBase64Encode(t *testing.T) {
 	}
 }
 
+func TestBase64EncodeImgix(t *testing.T) {
+	t.Parallel()
+	c := qt.New(t)
+
+	ns := New()
+
+	for _, test := range []struct {
+		v      interface{}
+		expect interface{}
+	}{
+		{"Hello%2C%20World!", "SGVsbG8lMkMlMjBXb3JsZCE"},
+		// errors
+		{t, false},
+	} {
+
+		result, err := ns.Base64EncodeImgix(test.v)
+
+		if b, ok := test.expect.(bool); ok && !b {
+			c.Assert(err, qt.Not(qt.IsNil))
+			continue
+		}
+
+		c.Assert(err, qt.IsNil)
+		c.Assert(result, qt.Equals, test.expect)
+	}
+}
+
 func TestJsonify(t *testing.T) {
 	t.Parallel()
 	c := qt.New(t)
