@@ -197,19 +197,36 @@ func (ns *Namespace) AbsLangURL(a interface{}) (template.HTML, error) {
 	return template.HTML(ns.deps.PathSpec.AbsURL(s, !ns.multihost)), nil
 }
 
-// ImgProxyURL takes a given string and converts it to an absolute URL according
-// to a page's position in the project directory structure and the current
-// language.
-func (ns *Namespace) ImgProxyURL(args ...interface{}) (string, error) {
+// Matches http:// and https://
+var regexpHTTPAndS = regexp.MustCompile("https?://")
+
+// ImgproxyURL builds and signs a url for an imgproxy server.
+// See:
+// - https://imgproxy.net
+// - https://docs.imgproxy.net/#/generating_the_url_advanced
+// - https://docs.imgproxy.net/#/signing_the_url
+func (ns *Namespace) ImgproxyURL(args ...interface{}) (string, error) {
 
 	url, err := cast.ToStringE(args[0])
 	if err != nil {
 		return "", err
 	}
 
-	process, err := cast.ToStringE(args[1])
-	if err != nil {
-		return "", err
+	if url == "" {
+		return "", errors.New("empty url given to imgixURL")
+	}
+
+	// get params - (optional) second argument (default: "")
+	process := ""
+	if len(args) > 1 {
+		process, err = cast.ToStringE(args[1])
+		if err != nil {
+			return "", err
+		}
+	}
+
+	if process == "" {
+		process = "w:0"
 	}
 
 	key := ns.deps.Cfg.GetString("imgproxy.key")
@@ -338,9 +355,6 @@ func (ns *Namespace) ImgixURL(args ...interface{}) (string, error) {
 		return "", errors.New("to many parameters to imgixURL")
 	}
 
-	// Matches http:// and https://
-	var RegexpHTTPAndS = regexp.MustCompile("https?://")
-
 	// let's check to be sure:
 
 	// for empty serverURL
@@ -349,7 +363,7 @@ func (ns *Namespace) ImgixURL(args ...interface{}) (string, error) {
 	}
 
 	// a server URL without http or https (than https will be default)
-	if !RegexpHTTPAndS.MatchString(serverURL) {
+	if !regexpHTTPAndS.MatchString(serverURL) {
 		serverURL = "https://" + serverURL
 	}
 
@@ -360,7 +374,7 @@ func (ns *Namespace) ImgixURL(args ...interface{}) (string, error) {
 
 	// If we are given a fully-qualified URL, escape it per the note located
 	// near the `cgiEscape` function definition
-	if RegexpHTTPAndS.MatchString(path) {
+	if regexpHTTPAndS.MatchString(path) {
 		path = cgiEscape(path)
 	}
 
