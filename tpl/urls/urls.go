@@ -207,52 +207,157 @@ var regexpHTTPAndS = regexp.MustCompile("https?://")
 // - https://docs.imgproxy.net/#/signing_the_url
 func (ns *Namespace) ImgproxyURL(args ...interface{}) (string, error) {
 
-	url, err := cast.ToStringE(args[0])
+	path, err := cast.ToStringE(args[0])
 	if err != nil {
 		return "", err
 	}
 
-	if url == "" {
-		return "", errors.New("empty url given to imgixURL")
+	if path == "" {
+		return "", errors.New("empty path given to imgproxyURL")
 	}
 
 	// get params - (optional) second argument (default: "")
-	process := ""
+	params := ""
 	if len(args) > 1 {
-		process, err = cast.ToStringE(args[1])
+		params, err = cast.ToStringE(args[1])
 		if err != nil {
 			return "", err
 		}
 	}
 
-	if process == "" {
-		process = "w:0"
+	// default
+	serverURL := ""
+	secureURL := false
+	key := ""
+	salt := ""
+	pathPrefix := ns.deps.Cfg.GetString("imgproxy.pathPrefix")
+	defaultParams := ns.deps.Cfg.GetString("imgproxy.defaultParams")
+
+	if len(args) <= 2 {
+		// no more arguments, read values from cfg
+		serverURL = ns.deps.Cfg.GetString("imgproxy.serverurl")
+		secureURL = ns.deps.Cfg.GetBool("imgproxy.secureurl")
+		key = ns.deps.Cfg.GetString("imgproxy.key")
+		salt = ns.deps.Cfg.GetString("imgproxy.salt")
+
+	} else if len(args) == 3 {
+		// one more, this musst be a cfg id
+
+		cfgID, err := cast.ToStringE(args[2])
+		if err != nil {
+			return "", err
+		}
+
+		serverURL = ns.deps.Cfg.GetString("imgproxy." + cfgID + ".serverurl")
+		secureURL = ns.deps.Cfg.GetBool("imgproxy." + cfgID + ".secureurl")
+		key = ns.deps.Cfg.GetString("imgproxy." + cfgID + ".key")
+		salt = ns.deps.Cfg.GetString("imgproxy." + cfgID + ".salt")
+		pathPrefix = ns.deps.Cfg.GetString("imgproxy." + cfgID + ".pathPrefix")
+		defaultParams = ns.deps.Cfg.GetString("imgproxy." + cfgID + ".defaultParams")
+
+	} else if len(args) == 5 {
+		// four arguments, this means, 3rd is a server URL and 4th a token
+
+		serverURL, err = cast.ToStringE(args[2])
+		if err != nil {
+			return "", err
+		}
+
+		key, err = cast.ToStringE(args[3])
+		if err != nil {
+			return "", err
+		}
+
+		salt, err = cast.ToStringE(args[4])
+		if err != nil {
+			return "", err
+		}
+
+		// when we have a server URL and a token, secureURL is true by default
+		if key != "" {
+			secureURL = true
+		}
+
+	} else if (len(args) == 4) || (len(args) > 5) {
+		return "", errors.New("to many parameters to imgproxyURL")
 	}
 
-	key := ns.deps.Cfg.GetString("imgproxy.key")
-	salt := ns.deps.Cfg.GetString("imgproxy.salt")
-	serverURL := ns.deps.Cfg.GetString("imgproxy.serverurl")
+	// let's check to be sure:
+
+	// for empty serverURL
+	if serverURL == "" {
+		return "", errors.New("no server URL configured or passed to imgproxyURL")
+	}
+
+	// a server URL without http or https (than https will be default)
+	if !regexpHTTPAndS.MatchString(serverURL) {
+		serverURL = "https://" + serverURL
+	}
+
+	// a request for a signed URL, but we have no token
+	if secureURL && (key == "") {
+		return "", errors.New("URL shoud be secured, but no key configured or passed to imgproxyURL")
+	}
+
+	// set a default param to pass through an "unmodified" image if params is empty
+	if params == "" {
+		if defaultParams == "" {
+			params = "w:0"
+		} else {
+			params = defaultParams
+		}
+	}
+
+	if pathPrefix != "" {
+		path = pathPrefix + path
+	}
+
+	// check for local path
+	if !regexpHTTPAndS.MatchString(path) {
+		if strings.Index(path, "local://") != 0 {
+			// ensure a leading slash
+			if strings.Index(path, "/") != 0 {
+				path = "/" + path
+			}
+			path = "local://" + path
+		}
+	}
+
+	extension := ""
+
+	index := strings.LastIndex(path, "@")
+	if (index != -1) && ((len(path) - index) <= 5) {
+		extension = "." + path[(index+1):]
+		path = path[:index]
+	} else {
+		index := strings.LastIndex(path, ".")
+		if index != -1 {
+			extension = path[index:]
+		}
+	}
 
 	var keyBin, saltBin []byte
 
 	if keyBin, err = hex.DecodeString(key); err != nil {
-		return "", errors.New("imgproxy key expected to be a hex-encoded string in imgProxyURL")
+		return "", errors.New("imgproxy key expected to be a hex-encoded string in imgproxyURL")
 	}
 
 	if saltBin, err = hex.DecodeString(salt); err != nil {
 		return "", errors.New("imgproxy salt expected to be a hex-encoded string in imgProxyURL")
 	}
 
-	encodedURL := base64.RawURLEncoding.EncodeToString([]byte(url))
+	encodedURL := base64.RawURLEncoding.EncodeToString([]byte(path))
 
-	path := "/" + process + "/" + encodedURL
+	encodedURL = encodedURL + extension
+
+	signatureBase := "/" + params + "/" + encodedURL
 
 	h := hmac.New(sha256.New, keyBin)
 	h.Write(saltBin)
-	h.Write([]byte(path))
+	h.Write([]byte(signatureBase))
 	signature := base64.RawURLEncoding.EncodeToString(h.Sum(nil))
 
-	ret := serverURL + "/" + signature + path
+	ret := serverURL + "/" + signature + signatureBase
 
 	return ret, err
 }
@@ -413,4 +518,227 @@ func (ns *Namespace) ImgixURL(args ...interface{}) (string, error) {
 	}
 
 	return url, err
+}
+
+// ImgURL builds and signs urls for an image server like Imgix or imgroxy.
+//
+// Today there are four server types implementet: Plain, Imgix, imgproxy
+//
+// See:
+// - https://imgproxy.net
+// - https://docs.imgproxy.net/#/generating_the_url_advanced
+// - https://docs.imgproxy.net/#/signing_the_url
+// - https://imgix.com
+// - https://docs.imgix.com/setup/serving-images
+// - https://docs.imgix.com/setup/securing-images
+// - https://docs.imgix.com/apis/url
+//
+// Some code is inspired by Imgix GO library:
+// https://github.com/parkr/imgix-go/blob/master/imgix.go (MIT License)
+//
+func (ns *Namespace) ImgURL(args ...interface{}) (string, error) {
+
+	// we need at least a path
+	if len(args) == 0 {
+		return "", errors.New("to few parameters: no path is given to imgURL")
+	}
+
+	path, err := cast.ToStringE(args[0])
+	if err != nil {
+		return "", err
+	}
+
+	// empty path makes no sence
+	if path == "" {
+		return "", errors.New("empty path given to imgURL")
+	}
+
+	// get params - (optional) second argument (default: "")
+	paramsMap := map[string]interface{}{}
+	params := ""
+	if len(args) > 1 {
+		params, err = cast.ToStringE(args[1])
+		if err != nil {
+			paramsMap, err = cast.ToStringMapE(args[1])
+			if err != nil {
+				return "", err
+			}
+		}
+	}
+
+	// if we have exact 3 arguments, the thrid one is always a config id
+	cfgID := "default"
+	if len(args) == 3 {
+		cfgID, err = cast.ToStringE(args[2])
+		if err != nil {
+			return "", err
+		}
+		cfgID = strings.ToLower(cfgID)
+	}
+
+	// more than 3 arguments? something went wrong
+	if len(args) > 3 {
+		return "", errors.New("to many parameters to imgURL")
+	}
+
+	serverType := strings.ToLower(ns.deps.Cfg.GetString("imgserver." + cfgID + ".servertype"))
+	serverURL := ns.deps.Cfg.GetString("imgserver." + cfgID + ".serverurl")
+	signURL := ns.deps.Cfg.GetBool("imgserver." + cfgID + ".signurl")
+	pathPrefix := ns.deps.Cfg.GetString("imgserver." + cfgID + ".pathprefix")
+	defaultParams := ns.deps.Cfg.GetString("imgserver." + cfgID + ".defaultparams")
+
+	token, salt := "", ""
+
+	switch serverType {
+	case "imgix":
+		token = ns.deps.Cfg.GetString("imgServer." + cfgID + ".token")
+	case "imgproxy":
+		token = ns.deps.Cfg.GetString("imgServer." + cfgID + ".key")
+		salt = ns.deps.Cfg.GetString("imgServer." + cfgID + ".salt")
+	case "plain":
+	default:
+		return "", errors.New("unknonwn serverType detected in imgURL")
+	}
+
+	for k, v := range paramsMap {
+		value, err := cast.ToStringE(v)
+		if err != nil {
+			return "", err
+		}
+
+		switch serverType {
+		case "imgix":
+			params = params + k + "=" + value
+		case "imgproxy":
+			params = params + k + ":" + value
+		case "plain":
+			params = params + k + ":" + value
+		default:
+		}
+	}
+
+	// let's do some checks to be sure:
+
+	// for an empty serverURL
+	if serverURL == "" {
+		return "", errors.New("no server URL configured for imgURL")
+	}
+
+	// a server URL without http or https (than https will be default)
+	if !regexpHTTPAndS.MatchString(serverURL) {
+		serverURL = "https://" + serverURL
+	}
+
+	// a request for a signed URL, but we have no token
+	if signURL && (token == "") {
+		return "", errors.New("URL shoud be secured, but no key/token configured for imgURL")
+	}
+
+	// set a default param to pass through an "unmodified" image if params is empty
+	if params == "" {
+		if defaultParams == "" {
+			if serverType == "imgproxy" {
+				params = "w:0"
+			}
+		} else {
+			params = defaultParams
+		}
+	}
+
+	if pathPrefix != "" {
+		path = pathPrefix + path
+	}
+
+	if serverType == "imgproxy" {
+		// check for local path
+		if !regexpHTTPAndS.MatchString(path) {
+			if strings.Index(path, "local://") != 0 {
+				// ensure a leading slash
+				if strings.Index(path, "/") != 0 {
+					path = "/" + path
+				}
+				path = "local://" + path
+			}
+		}
+	} else if serverType == "imgix" {
+		// ensure a leading slash
+		if strings.Index(path, "/") != 0 {
+			path = "/" + path
+		}
+	}
+
+	if serverType == "imgproxy" {
+
+		extension := ""
+		index := strings.LastIndex(path, "@")
+		if (index != -1) && ((len(path) - index) <= 5) {
+			extension = "." + path[(index+1):]
+			path = path[:index]
+		} else {
+			index := strings.LastIndex(path, ".")
+			if index != -1 {
+				extension = path[index:]
+			}
+		}
+
+		var keyBin, saltBin []byte
+
+		if keyBin, err = hex.DecodeString(token); err != nil {
+			return "", errors.New("imgproxy key expected to be a hex-encoded string in imgURL")
+		}
+
+		if saltBin, err = hex.DecodeString(salt); err != nil {
+			return "", errors.New("imgproxy salt expected to be a hex-encoded string in imgURL")
+		}
+
+		encodedURL := base64.RawURLEncoding.EncodeToString([]byte(path))
+
+		encodedURL = encodedURL + extension
+
+		signatureBase := "/" + params + "/" + encodedURL
+
+		h := hmac.New(sha256.New, keyBin)
+		h.Write(saltBin)
+		h.Write([]byte(signatureBase))
+		signature := base64.RawURLEncoding.EncodeToString(h.Sum(nil))
+
+		url := serverURL + "/" + signature + signatureBase
+
+		return url, err
+
+	} else if serverType == "imgix" {
+		pathWithParams := path
+
+		if params != "" {
+			if strings.Index(params, "?") == 0 {
+				pathWithParams = pathWithParams + params
+			} else {
+				pathWithParams = pathWithParams + "?" + params
+			}
+		}
+
+		url := serverURL + pathWithParams
+
+		if signURL {
+			// calculate signature
+			signatureBase := token + pathWithParams
+			h := md5.New()
+			io.WriteString(h, signatureBase)
+			signature := h.Sum(nil)
+
+			// append signature
+			if len(params) != 0 {
+				url = url + "&s=" + hex.EncodeToString(signature)
+			} else {
+				url = url + "?s=" + hex.EncodeToString(signature)
+			}
+		}
+
+		return url, err
+	} else if serverType == "plain" {
+		url := serverURL + path + params
+		return url, err
+	}
+
+	return "", err
 }
