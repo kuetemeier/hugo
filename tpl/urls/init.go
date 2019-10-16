@@ -76,6 +76,11 @@ func init() {
 			[][2]string{},
 		)
 
+		ns.AddMethodMapping(ctx.ImgURL,
+			[]string{"imgURL"},
+			[][2]string{},
+		)
+
 		return ns
 
 	}
