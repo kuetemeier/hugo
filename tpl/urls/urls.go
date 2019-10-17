@@ -280,17 +280,38 @@ func (ns *Namespace) ImgURL(args ...interface{}) (string, error) {
 	signURL := ns.deps.Cfg.GetBool("imgserver." + cfgID + ".signurl")
 	pathPrefix := ns.deps.Cfg.GetString("imgserver." + cfgID + ".pathprefix")
 	defaultParams := ns.deps.Cfg.GetString("imgserver." + cfgID + ".defaultparams")
+	doNotOptimizeParams := ns.deps.Cfg.GetBool("imgserver." + cfgID + ".doNotOptimizeParams")
 
+	// an alias for token is "key"
 	token, salt := "", ""
 	paramsSeperator := ":"
+	paramsConcat := "&"
+	extension := ""
 
 	switch serverType {
 	case "imgix":
 		token = ns.deps.Cfg.GetString("imgServer." + cfgID + ".token")
 		paramsSeperator = "="
+
 	case "imgproxy":
 		token = ns.deps.Cfg.GetString("imgServer." + cfgID + ".key")
 		salt = ns.deps.Cfg.GetString("imgServer." + cfgID + ".salt")
+		paramsConcat = "/"
+
+		// try to guess the extension from the path or get it from the @ part in the path
+		// "/my/image.jpg" => ".jpg"
+		// "/my/image.jpg@png" => ".png"
+		index := strings.LastIndex(path, "@")
+		if (index != -1) && ((len(path) - index) <= 5) {
+			extension = "." + path[(index+1):]
+			path = path[:index]
+		} else {
+			index := strings.LastIndex(path, ".")
+			if index != -1 {
+				extension = path[index:]
+			}
+		}
+
 	case "plain":
 	default:
 		return "", errors.New("unknonwn serverType detected in imgURL")
@@ -303,10 +324,38 @@ func (ns *Namespace) ImgURL(args ...interface{}) (string, error) {
 			return "", err
 		}
 
+		if !doNotOptimizeParams {
+			switch k {
+			// normalize and optimie the "format" key for imgix and imgproxy
+			case "f", "format", "ext", "fm":
+				switch serverType {
+				case "imgix":
+					k = "fm"
+				case "imgproxy":
+					k = "f"
+					// set url extension from format key (note: this overrides @ in path!)
+					extension = "." + value
+				}
+			case "quality":
+				k = "q"
+			case "lossless":
+				if serverType == "imgproxy" {
+					// as far as I can tell, there is no lossless parameter for imgproxy
+					// q=100 would not help much with png and webp
+					continue
+				}
+			case "expire":
+				if serverType == "imgproxy" {
+					// there is no such feature in imgproxy
+					return "", errors.New("there is no 'expire' feature in imgproxy,yet - imgURL")
+				}
+			}
+		}
+
 		if firstParam {
 			firstParam = false
 		} else {
-			params = params + "&"
+			params = params + paramsConcat
 		}
 
 		params = params + k + paramsSeperator + value
@@ -367,18 +416,6 @@ func (ns *Namespace) ImgURL(args ...interface{}) (string, error) {
 	}
 
 	if serverType == "imgproxy" {
-
-		extension := ""
-		index := strings.LastIndex(path, "@")
-		if (index != -1) && ((len(path) - index) <= 5) {
-			extension = "." + path[(index+1):]
-			path = path[:index]
-		} else {
-			index := strings.LastIndex(path, ".")
-			if index != -1 {
-				extension = path[index:]
-			}
-		}
 
 		var keyBin, saltBin []byte
 
