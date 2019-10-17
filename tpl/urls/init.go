@@ -66,16 +66,6 @@ func init() {
 			},
 		)
 
-		ns.AddMethodMapping(ctx.ImgproxyURL,
-			[]string{"imgproxyURL"},
-			[][2]string{},
-		)
-
-		ns.AddMethodMapping(ctx.ImgixURL,
-			[]string{"imgixURL"},
-			[][2]string{},
-		)
-
 		ns.AddMethodMapping(ctx.ImgURL,
 			[]string{"imgURL"},
 			[][2]string{},
