@@ -50,6 +50,7 @@ const (
 	metaKeyOpener                     = "opener"
 	metaKeyIsOrdered                  = "isOrdered"
 	metaKeyIsSymlink                  = "isSymlink"
+	metaKeyJoinStat                   = "joinStat"
 	metaKeySkipDir                    = "skipDir"
 	metaKeyClassifier                 = "classifier"
 	metaKeyTranslationBaseName        = "translationBaseName"
@@ -177,6 +178,14 @@ func (f FileMeta) Open() (afero.File, error) {
 	return v.(func() (afero.File, error))()
 }
 
+func (f FileMeta) JoinStat(name string) (FileMetaInfo, error) {
+	v, found := f[metaKeyJoinStat]
+	if !found {
+		return nil, os.ErrNotExist
+	}
+	return v.(func(name string) (FileMetaInfo, error))(name)
+}
+
 func (f FileMeta) stringV(key string) string {
 	if v, found := f[key]; found {
 		return v.(string)
@@ -272,7 +281,7 @@ func (fi *dirNameOnlyFileInfo) Sys() interface{} {
 	return nil
 }
 
-func newDirNameOnlyFileInfo(name string, meta FileMeta, isOrdered bool, fileOpener func() (afero.File, error)) FileMetaInfo {
+func newDirNameOnlyFileInfo(name string, meta FileMeta, fileOpener func() (afero.File, error)) FileMetaInfo {
 	name = normalizeFilename(name)
 	_, base := filepath.Split(name)
 
@@ -281,7 +290,7 @@ func newDirNameOnlyFileInfo(name string, meta FileMeta, isOrdered bool, fileOpen
 		m.setIfNotZero(metaKeyFilename, name)
 	}
 	m[metaKeyOpener] = fileOpener
-	m[metaKeyIsOrdered] = isOrdered
+	m[metaKeyIsOrdered] = false
 
 	return NewFileMetaInfo(
 		&dirNameOnlyFileInfo{name: base},
